@@ -684,8 +684,8 @@
 
     <script>
         // ============================================================
-        // 阅读器 - 独立HTML版
-        // 数据保存在 localStorage
+        // 阅读器 - IndexedDB 版
+        // 数据存储在 IndexedDB，更可靠
         // ============================================================
 
         // ---------- 状态 ----------
@@ -698,6 +698,8 @@
         let fontSize = 18;
         let themeMode = 'paper';
         let scrollTimeout = null;
+        let db = null;
+        let dbReady = false;
 
         // DOM 引用
         const contentEl = document.getElementById('content');
@@ -714,8 +716,52 @@
             return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
         }
 
+        // ========== IndexedDB 初始化 ==========
+        function initDB() {
+            return new Promise((resolve, reject) => {
+                const request = indexedDB.open('ReaderDB', 1);
+                request.onerror = function() { reject(request.error); };
+                request.onsuccess = function() {
+                    db = request.result;
+                    dbReady = true;
+                    resolve();
+                };
+                request.onupgradeneeded = function(e) {
+                    const db = e.target.result;
+                    if (!db.objectStoreNames.contains('data')) {
+                        const store = db.createObjectStore('data', { keyPath: 'key' });
+                        console.log('[DB] 创建 data 表');
+                    }
+                };
+            });
+        }
+
+        // ---------- 保存数据到 IndexedDB ----------
+        function saveDataToDB(data) {
+            return new Promise((resolve, reject) => {
+                if (!dbReady) { reject(new Error('数据库未就绪')); return; }
+                const tx = db.transaction(['data'], 'readwrite');
+                const store = tx.objectStore('data');
+                const req = store.put({ key: 'reader_data', value: data });
+                req.onsuccess = function() { resolve(); };
+                req.onerror = function() { reject(req.error); };
+            });
+        }
+
+        // ---------- 从 IndexedDB 加载数据 ----------
+        function loadDataFromDB() {
+            return new Promise((resolve, reject) => {
+                if (!dbReady) { reject(new Error('数据库未就绪')); return; }
+                const tx = db.transaction(['data'], 'readonly');
+                const store = tx.objectStore('data');
+                const req = store.get('reader_data');
+                req.onsuccess = function() { resolve(req.result ? req.result.value : null); };
+                req.onerror = function() { reject(req.error); };
+            });
+        }
+
         // ---------- 数据持久化 ----------
-        function saveData() {
+        async function saveData() {
             try {
                 if (currentNovelId) {
                     const idx = novels.findIndex(n => n.id === currentNovelId);
@@ -731,17 +777,17 @@
                     fontSize: fontSize,
                     themeMode: themeMode
                 };
-                localStorage.setItem('reader_data', JSON.stringify(data));
+                await saveDataToDB(data);
+                console.log('[保存] 成功，书籍数:', novels.length);
             } catch (e) {
                 console.error('[保存] 失败:', e);
             }
         }
 
-        function loadData() {
+        async function loadData() {
             try {
-                const raw = localStorage.getItem('reader_data');
-                if (!raw) return;
-                const data = JSON.parse(raw);
+                const data = await loadDataFromDB();
+                if (!data) return;
                 novels = data.novels || [];
                 currentNovelId = data.currentNovelId || null;
                 fontSize = data.fontSize || 18;
@@ -756,6 +802,7 @@
                         currentChapterIdx = cur.lastChapter || 0;
                     }
                 }
+                console.log('[加载] 成功，书籍数:', novels.length);
             } catch (e) {
                 console.error('[加载] 失败:', e);
             }
@@ -1167,22 +1214,55 @@
         });
 
         // ---------- 启动 ----------
-        loadData();
-        applyTheme();
-        buildBookMenu();
-        renderChapter();
+        async function start() {
+            try {
+                await initDB();
+                await loadData();
+                applyTheme();
+                buildBookMenu();
+                renderChapter();
 
-        if (currentNovelId) {
-            const novel = novels.find(n => n.id === currentNovelId);
-            if (novel && novel.lastPos) {
-                setTimeout(() => {
-                    contentEl.scrollTop = novel.lastPos;
-                }, 150);
+                if (currentNovelId) {
+                    const novel = novels.find(n => n.id === currentNovelId);
+                    if (novel && novel.lastPos) {
+                        setTimeout(() => {
+                            contentEl.scrollTop = novel.lastPos;
+                        }, 150);
+                    }
+                }
+
+                console.log('[阅读器] 已启动 (IndexedDB版)');
+                console.log('[快捷键] ← 上一章 | → 下一章 | ESC 关闭');
+            } catch (e) {
+                console.error('[启动] 失败:', e);
+                // 降级尝试：如果 IndexedDB 失败，尝试从 localStorage 恢复
+                try {
+                    const raw = localStorage.getItem('reader_data');
+                    if (raw) {
+                        const data = JSON.parse(raw);
+                        novels = data.novels || [];
+                        currentNovelId = data.currentNovelId || null;
+                        fontSize = data.fontSize || 18;
+                        themeMode = data.themeMode || 'paper';
+                        if (currentNovelId) {
+                            const cur = novels.find(n => n.id === currentNovelId);
+                            if (cur) {
+                                currentContent = cur.content;
+                                currentName = cur.name;
+                                currentChapters = cur.chapters || [];
+                                currentChapterIdx = cur.lastChapter || 0;
+                            }
+                        }
+                        applyTheme();
+                        buildBookMenu();
+                        renderChapter();
+                        console.log('[降级] 从 localStorage 恢复成功');
+                    }
+                } catch(e2) {}
             }
         }
 
-        console.log('[阅读器] 已启动 (独立HTML版)');
-        console.log('[快捷键] ← 上一章 | → 下一章 | ESC 关闭');
+        start();
     </script>
 
 </body>
