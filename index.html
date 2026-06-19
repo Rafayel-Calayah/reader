@@ -2,22 +2,47 @@
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+
+    <!-- ===== 手机桌面图标 ===== -->
+    <!-- 浏览器标签小图标 -->
+    <link rel="icon" href="/icon.png" type="image/png">
+    <!-- 安卓/苹果桌面快捷方式图标 -->
+    <link rel="apple-touch-icon" href="/touch-icon.png">
+    <!-- 微软/Windows 图标 -->
+    <meta name="msapplication-TileImage" content="/touch-icon.png">
+    <meta name="msapplication-TileColor" content="#fdf8ed">
+
+    <!-- ===== 全屏无地址栏设置 ===== -->
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="mobile-web-app-capable" content="yes">
+
+    <!-- ===== 视口设置 ===== -->
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+
+    <!-- ===== 主题色 ===== -->
+    <meta name="theme-color" content="#fdf8ed">
+
     <title>阅读器</title>
     <style>
+        /* ===== 全局重置 ===== */
         * {
             margin: 0;
             padding: 0;
             box-sizing: border-box;
         }
+        html, body {
+            height: 100%;
+            overflow: hidden;
+        }
         body {
             font-family: 'Georgia', 'Times New Roman', '宋体', 'Noto Serif SC', serif;
             background: #fdf8ed;
             color: #3d2b1a;
-            height: 100vh;
-            overflow: hidden;
             display: flex;
             flex-direction: column;
+            /* 防止 iOS 橡皮筋效果影响全屏体验 */
+            overscroll-behavior: none;
         }
 
         /* ===== 顶部栏 ===== */
@@ -31,6 +56,8 @@
             border-bottom: 1px solid #ece0cf;
             gap: 8px;
             flex-wrap: wrap;
+            /* 全屏时状态栏下方安全区域 */
+            padding-top: env(safe-area-inset-top, 8px);
         }
         .header-left {
             display: flex;
@@ -293,6 +320,8 @@
             line-height: 1.85;
             background: #fdf8ed;
             color: #3d2b1a;
+            /* 优化滚动 */
+            -webkit-overflow-scrolling: touch;
         }
         .content .placeholder {
             display: flex;
@@ -359,6 +388,7 @@
             justify-content: center;
             gap: 20px;
             border-top: 1px solid #ece0cf;
+            padding-bottom: env(safe-area-inset-bottom, 10px);
         }
         .bottom-nav button {
             background: #d4a37308;
@@ -620,6 +650,18 @@
                 min-width: 38px;
             }
         }
+
+        /* ===== 全屏模式 ===== */
+        .reader-fullscreen .header,
+        .reader-fullscreen .toolbar,
+        .reader-fullscreen .bottom-nav {
+            background: #fdf8ed;
+        }
+        body.dark.reader-fullscreen .header,
+        body.dark.reader-fullscreen .toolbar,
+        body.dark.reader-fullscreen .bottom-nav {
+            background: #0d0e12;
+        }
     </style>
 </head>
 <body>
@@ -700,6 +742,7 @@
         let scrollTimeout = null;
         let db = null;
         let dbReady = false;
+        let fullscreenEnabled = false;
 
         // DOM 引用
         const contentEl = document.getElementById('content');
@@ -1213,6 +1256,52 @@
             }
         });
 
+        // ============================================================
+        // 手机端优化：隐藏地址栏 + 点击全屏
+        // ============================================================
+
+        // 1. 页面加载后滚动以隐藏地址栏
+        window.addEventListener('load', () => {
+            setTimeout(() => window.scrollTo(0, 1), 200);
+        });
+
+        // 2. 点击页面任意位置进入全屏（仅移动端）
+        document.body.onclick = function() {
+            if (!fullscreenEnabled) {
+                try {
+                    const el = document.documentElement;
+                    if (el.requestFullscreen) {
+                        el.requestFullscreen().then(() => {
+                            fullscreenEnabled = true;
+                            document.body.classList.add('reader-fullscreen');
+                        }).catch(() => {});
+                    } else if (el.webkitRequestFullscreen) {
+                        el.webkitRequestFullscreen();
+                        fullscreenEnabled = true;
+                        document.body.classList.add('reader-fullscreen');
+                    } else if (el.msRequestFullscreen) {
+                        el.msRequestFullscreen();
+                        fullscreenEnabled = true;
+                        document.body.classList.add('reader-fullscreen');
+                    }
+                } catch(e) {}
+            }
+        };
+
+        // 退出全屏时移除标记
+        document.addEventListener('fullscreenchange', () => {
+            if (!document.fullscreenElement) {
+                fullscreenEnabled = false;
+                document.body.classList.remove('reader-fullscreen');
+            }
+        });
+        document.addEventListener('webkitfullscreenchange', () => {
+            if (!document.webkitFullscreenElement) {
+                fullscreenEnabled = false;
+                document.body.classList.remove('reader-fullscreen');
+            }
+        });
+
         // ---------- 启动 ----------
         async function start() {
             try {
@@ -1233,6 +1322,7 @@
 
                 console.log('[阅读器] 已启动 (IndexedDB版)');
                 console.log('[快捷键] ← 上一章 | → 下一章 | ESC 关闭');
+                console.log('[全屏] 点击任意位置进入全屏');
             } catch (e) {
                 console.error('[启动] 失败:', e);
                 // 降级尝试：如果 IndexedDB 失败，尝试从 localStorage 恢复
